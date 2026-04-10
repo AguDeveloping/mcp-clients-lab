@@ -1,123 +1,131 @@
-# MCP Hello World — Local File Reader
+# mcp-clients-lab
 
-A minimal **Model Context Protocol (MCP)** server written in TypeScript. This is the simplest possible example of how to expose a local tool to an AI agent (like Claude Desktop or Cursor).
+A hands-on learning lab for the **Model Context Protocol (MCP)** — exploring both server and client patterns using TypeScript, Bun, and Docker.
 
 ---
 
 ## What is MCP?
 
-MCP (Model Context Protocol) is an open standard that lets AI assistants talk to external tools and data sources in a structured way. Think of it as a plugin system: you write a server that exposes "tools", and the AI can call those tools during a conversation.
+MCP (Model Context Protocol) is an open standard that lets AI assistants talk to external tools and data sources in a structured way. You write a server that exposes **tools**, and any MCP client (Claude Desktop, GitHub Copilot, or your own code) can call those tools through a standardized JSON-RPC protocol.
 
 ---
 
-## What does this example do?
+## What this repo covers
 
-This server exposes a single tool called `read_local_file`. When an AI agent asks to read a file, the server:
+### 1. Your own MCP server (`src/index.ts`)
+A minimal server that exposes one tool: `read_local_file`. Teaches the server-side lifecycle — declare tools, handle calls, connect via stdio transport.
 
-1. Receives the tool call with a `filename` argument.
-2. Resolves the path relative to the server's working directory.
-3. Reads the file from disk and returns its contents as text.
+### 2. MCP clients (`src/clients/`)
 
-That's it — intentionally simple so you can see every moving part.
+| Client | Server | What it does |
+|---|---|---|
+| `client.ts` | your `index.ts` | reads `src/hello.md` — both sides in one command |
+| `client-playwright.ts` | `mcp/playwright` (Docker) | navigates Google, saves a screenshot |
+| `client-mongodb.ts` | `mcp/mongodb` (Docker) | queries cards collection, syncs tools catalogue |
+| `client-github.ts` | `ghcr.io/github/github-mcp-server` (Docker) | lists GitHub repositories |
 
 ---
 
-## Project structure
+## The core pattern
+
+Every client follows the same 5 steps regardless of which server it connects to:
 
 ```
-index.ts       ← the entire MCP server (one file)
-package.json
-tsconfig.json
+STEP 1 — Create transport   (stdio: spawn process or docker run)
+STEP 2 — Connect client     (JSON-RPC handshake)
+STEP 3 — listTools()        (discover what the server can do)
+STEP 4 — callTool()         (do it)
+STEP 5 — close()            (container stops and removes itself)
 ```
 
-### Key sections inside `index.ts`
+---
 
-| Section | What it does |
-|---------|-------------|
-| **Initialize the Server** | Creates an MCP `Server` instance with a name and version, and declares it supports `tools`. |
-| **Define the Tools** | Declares the `read_local_file` tool with a JSON Schema so the AI knows what arguments to pass. |
-| **Handle Tool Execution** | Reads the requested file with `fs.readFile` and returns the content (or an error message). |
-| **Connect** | Wires the server to `StdioServerTransport` so it communicates over standard I/O. |
+## Transport modes
+
+**stdio — you control the server (local dev)**
+```ts
+new StdioClientTransport({ command: "bun", args: ["src/index.ts"] })
+new StdioClientTransport({ command: "docker", args: ["run", "-i", "--rm", "mcp/mongodb"] })
+```
+
+**HTTP — server is already running (next step)**
+```ts
+new StreamableHTTPClientTransport(new URL("http://localhost:3000/mcp"))
+```
+
+The client code above STEP 1 is identical in both cases.
+
+---
+
+## Key insight
+
+```
+"dependencies": {
+  "@modelcontextprotocol/sdk": "^1.29.0"   ← only this
+}
+```
+
+No MongoDB driver. No Playwright package. No GitHub SDK. The servers live in Docker images — your code only speaks the protocol. Infrastructure complexity moves outside your project.
 
 ---
 
 ## Prerequisites
 
-- [Bun](https://bun.com) v1.3.7 or higher (used as runtime and package manager)
-- An MCP-compatible host: **Claude Desktop** or **Cursor**
+- [Bun](https://bun.sh) v1.3.7+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) with MCP Toolkit
 
 ---
 
-## Quick start
+## Running the clients
 
 ```bash
-# Install dependencies
-bun install
+# Your own server
+bun src/client.ts
 
-# Run the server
-bun run index.ts
-```
+# Playwright (Docker pulls image on first run)
+bun src/clients/client-playwright.ts
 
-You should see:
+# MongoDB (requires local MongoDB running)
+bun src/clients/client-mongodb.ts
 
-```
-TypeScript MCP Server running on stdio
-```
-
-The server is now listening on `stdio` and ready to be connected to a host.
-
----
-
-## Connecting to an MCP host
-
-### Cursor
-
-Add the following to your Cursor MCP settings (`.cursor/mcp.json` or the global config):
-
-```json
-{
-  "mcpServers": {
-    "hello-world": {
-      "command": "bun",
-      "args": ["run", "/absolute/path/to/index.ts"]
-    }
-  }
-}
-```
-
-### Claude Desktop
-
-Add it to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "hello-world": {
-      "command": "bun",
-      "args": ["run", "/absolute/path/to/index.ts"]
-    }
-  }
-}
-```
-
-Once connected, the AI can call `read_local_file` with a filename and get back the file contents.
-
----
-
-## How the tool call works (step by step)
-
-```
-AI agent                MCP server (this code)
-   |                          |
-   |--- ListTools ----------->|  "What tools do you have?"
-   |<-- [read_local_file] ----|  "I have this one tool."
-   |                          |
-   |--- CallTool ------------>|  { name: "read_local_file", arguments: { filename: "README.md" } }
-   |<-- { text: "..." } ------|  returns file contents
+# GitHub (requires token in .env.development.local)
+bun --env-file=.env.development.local src/clients/client-github.ts
 ```
 
 ---
 
-## Security note
+## Environment
 
-The server only reads files relative to `process.cwd()` — wherever you launch it from. It does not traverse outside that directory by default, keeping the AI's reach limited to your project folder.
+Create `.env.development.local`:
+```
+GITHUB_PERSONAL_ACCESS_TOKEN=ghp_yourtoken
+```
+
+---
+
+## The Docker lifecycle
+
+```
+bun src/clients/client-mongodb.ts
+  │
+  ├── docker run -i --rm mcp/mongodb   ← container starts
+  │     └── JSON-RPC over stdin/stdout
+  │
+  └── client.close()                   ← container stops and is removed (--rm)
+```
+
+Ephemeral by design. Each run gets a clean server instance.
+
+---
+
+## Architecture note
+
+The MCP client is the **adapter layer** in hexagonal architecture. Your domain logic calls a port interface. The adapter behind it speaks MCP to a Docker container. Swap the container, keep the domain unchanged.
+
+```
+Domain (your rules)
+  └── Port interface
+        └── MCP adapter  →  docker run mcp/anything
+```
+
+> The protocol is the contract. Your skills go inside the handlers.
