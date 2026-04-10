@@ -164,6 +164,7 @@ async function main() {
   // ─────────────────────────────────────────────
   log("STEP 5 | Closing connection");
   await client.close();
+  await transport.close();
   log("DONE   | Client finished.");
 }
 
