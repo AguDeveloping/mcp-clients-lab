@@ -1,0 +1,26 @@
+{
+  "name": "mcp-hello-world",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "compile": "bun tsc",
+    "build": "bun build --production --target=bun --outfile=dist/index.js ./src/index.ts",
+    "start": "bun dist/index.js",
+    "audit": "bun audit --audit-level=high",
+    "test:unit": "bun test src",
+    "test:integration": "bun test src",
+    "test:coverage": "bun test --coverage src"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.5.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}
